@@ -1,0 +1,274 @@
+---
+title: "District IV Profile"
+author: "David McClendon"
+date: "9/15/2019"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+---
+<style type="text/css">
+body { font-size: 16px; line-height:140%: font-family: 'Georgia', sans-serif; color:#333; }
+.tocify { font-size: 12px; border:none!important; border-radius:0px!important; }
+h2 { font-size:30px; }
+#TOC {
+  background: url("https://images.squarespace-cdn.com/content/5b4f6c5bcef3723dc9e26070/1539201004682-4EGL1XPJ9UTELJ407TNO/LISDLOGO_horizontal_NEW_dark.png?format=1500w&content-type=image%2Fpng");
+  background-size: 80%;
+  padding-bottom: 40px !important;
+  background-repeat: no-repeat;
+  background-position: left bottom;
+}
+.list-group-item.active, .list-group-item.active:focus, .list-group-item.active:hover {
+background-color: #327DBF;
+border-color: #327DBF;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+library(tidyverse)
+library(leaflet)
+library(DT)
+library(jastyle)
+library(sf)
+library(sp)
+library(htmlwidgets)
+
+dfsf <- readRDS(here::here("getStarted.rds"))
+df <- dfsf
+df$geometry <- NULL
+```
+
+# District comparison
+These tables compare District IV to other HISD Board districts on demographics and student achievement. All data comes from the Texas Education Agency (TEA).
+
+### Race-ethnicity
+Over half of students in District IV are Black/African American. This is the largest share of any board district.
+
+```{r race, echo=F}
+district_summary <- df %>% 
+  group_by(NAME2) %>% 
+  summarise(
+    `Students` = sum(CPETALLC, na.rm = T),
+    `% Asian-PI` = (sum(CPETASIC, na.rm = T) + sum(CPETPCIC, na.rm = T))/`Students`,
+    `% Black` = sum(CPETBLAC, na.rm = T)/`Students`,
+    `% Hispanic` = sum(CPETHISC, na.rm = T)/`Students`,
+    `% NH White` = sum(CPETWHIC, na.rm = T)/`Students`,
+    `% Other` = (sum(CPETINDC, na.rm = T) + sum(CPETTWOC, na.rm = T))/`Students`
+  ) %>% 
+  rename(`HISD District` = NAME2)
+
+datatable(district_summary, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Asian-PI","% Black","% Hispanic","% NH White", "% Other"), 0)
+
+```
+
+### Income and language
+District IV has lowest share of LEP students (14%). 3-in-4 students are economically disadvantaged (low-income and receiving free or reduced-price lunch). This is on par with the district at large. 
+
+```{r ecodis, echo=F}
+district_summary <- df %>% 
+  group_by(NAME2) %>% 
+  summarise(
+    `Students` = sum(CPETALLC, na.rm = T),
+    `% Economically Disadvantaged` = sum(CPETECOC, na.rm = T)/`Students`,
+    `% LEP students` = sum(CPETLEPC, na.rm = T) /`Students`
+
+  ) %>% 
+  rename(`HISD District` = NAME2)
+
+datatable(district_summary, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Economically Disadvantaged","% LEP students"), 0)
+```
+
+### School accountability rating (A-F)
+```{r}
+accountability <- df %>% 
+  count(NAME2, C_RATING) %>% 
+  filter(!is.na(C_RATING)) %>% 
+  group_by(NAME2) %>% 
+  mutate(
+    pct = n/sum(n)
+  ) %>% 
+  dplyr::select(-n) %>% 
+  spread(C_RATING, pct) %>% 
+  rename(`HISD District` = NAME2)
+
+datatable(accountability, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("A","B", "C", "D", "F", "Not Rated"), 0)
+
+```
+*Percentage of schools receiving A-F grade in 2018-2019*
+
+# District IV map
+```{r}
+mapdf <- dfsf %>% filter(NAME2=="IV") %>% 
+  mutate(
+    GRDTYPE = ifelse(GRDTYPE=="E", "Elementary",
+                     ifelse(GRDTYPE=="M", "Middle",
+                            ifelse(GRDTYPE=="S", "High", "Middle/High"))),
+    GRDTYPE = ifelse(is.na(GRDTYPE), "Early Childhood", GRDTYPE)
+  )
+
+
+
+schoolpal <- colorFactor(c("#A1B73B", "#1AB2F0", "#E5B235", "#D8382C", "purple"), n=5, domain = mapdf$GRDTYPE)
+#Color based on elem, middle, high
+
+leaflet(width = "100%") %>% 
+  addProviderTiles("CartoDB.Positron", group="Greyscale") %>% 
+  addCircleMarkers(data=mapdf, 
+                   color = schoolpal(mapdf$GRDTYPE),
+                   label = paste0(mapdf$School_Nam),
+                   popup= ifelse(mapdf$School_Nam == "KANDY STRIPE ACADEMY",
+                                 paste0("<strong>", mapdf$School_Nam, "</strong></br>",
+                                        "Not open 2018-2019 school year."),
+                                 paste0("<strong>", mapdf$School_Nam, "</strong></br>",
+                                "Asian-Pacific Islander: ", mapdf$CPETASIP, "%</br>",
+                                "Black/African American: ", mapdf$CPETBLAP, "%</br>",
+                                "Hispanic: ", mapdf$CPETHISP, "%</br>",
+                                "Non-Hispanic White: ", mapdf$CPETWHIP, "%</br>",
+                                "Other race-ethnicity: ", mapdf$CPETTWOP + mapdf$CPETINDP, "%</br>",
+                                "Economically disadvantaged: ", mapdf$CPETASIP, "%</br>",
+                                "LEP students: ", mapdf$CPETASIP, "%</br>",
+                                "2019 Accountability rating: ", mapdf$C_RATING
+                                ))
+                      ) %>%
+  addLegend("bottomright", pal = schoolpal, 
+            values = mapdf$GRDTYPE,
+            title = "Grade level",
+            opacity = 0.8)
+```
+
+
+
+# Elementary schools
+## Race-ethnicity
+```{r}
+df4 <- df %>% 
+  filter(NAME2=="IV") %>% 
+  mutate(
+    `School` = School_Nam,
+    `Students` = CPETALLC,
+    `% Asian-PI` = CPETASIP/100 + CPETPCIP/100,
+    `% Black` = CPETBLAP/100,
+    `% Hispanic` = CPETHISP/100,
+    `% NH White` = CPETWHIP/100,
+    `% Other` = CPETINDP/100 + CPETTWOP/100,
+    `% Economically Disadvantaged` = CPETECOP/100,
+    `% LEP` = CPETLEPP/100,
+    `Overall` = C_RATING,
+    `Student acheivement` = CD1G,
+    `School progress` = CD2AG,
+    `Closing the gaps` = CD3G
+  )
+
+race <- df4 %>% 
+  filter(GRDTYPE == "E") %>% 
+  dplyr::select(`School`, `Students`:`% Other`) %>% 
+  arrange(`School`)
+
+datatable(race, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Asian-PI","% Black","% Hispanic","% NH White", "% Other"), 0)
+
+```
+
+
+## Income and language
+```{r}
+inclang <- df4 %>% 
+  filter(GRDTYPE == "E") %>% 
+  dplyr::select(`School`, `% Economically Disadvantaged`:`% LEP`) %>% 
+  arrange(`School`)
+
+datatable(inclang, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Economically Disadvantaged","% LEP"), 0)
+```
+
+
+## School Accountability
+```{r}
+acct <- df4 %>% 
+  filter(GRDTYPE == "E") %>% 
+  dplyr::select(`School`, `Overall`:`Closing the gaps`) %>% 
+  arrange(`School`)
+
+datatable(acct, options = list(pageLength = 20, dom = 't'), rownames=F) 
+```
+
+
+# Middle schools
+## Race-ethnicity
+```{r}
+race <- df4 %>% 
+  filter(GRDTYPE == "M") %>% 
+  dplyr::select(`School`, `Students`:`% Other`) %>% 
+  arrange(`School`)
+
+datatable(race, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Asian-PI","% Black","% Hispanic","% NH White", "% Other"), 0)
+
+```
+
+
+## Income and language
+```{r}
+inclang <- df4 %>% 
+  filter(GRDTYPE == "M") %>% 
+  dplyr::select(`School`, `% Economically Disadvantaged`:`% LEP`) %>% 
+  arrange(`School`)
+
+datatable(inclang, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Economically Disadvantaged","% LEP"), 0)
+```
+
+
+## School Accountability
+```{r}
+acct <- df4 %>% 
+  filter(GRDTYPE == "M") %>% 
+  dplyr::select(`School`, `Overall`:`Closing the gaps`) %>% 
+  arrange(`School`)
+
+datatable(acct, options = list(pageLength = 20, dom = 't'), rownames=F) 
+```
+
+
+# High schools
+## Race-ethnicity
+```{r}
+race <- df4 %>% 
+  filter(GRDTYPE %in% c("S", "B")) %>% 
+  dplyr::select(`School`, `Students`:`% Other`) %>% 
+  arrange(`School`)
+
+datatable(race, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Asian-PI","% Black","% Hispanic","% NH White", "% Other"), 0)
+
+```
+
+
+## Income and language
+```{r}
+inclang <- df4 %>% 
+  filter(GRDTYPE %in% c("S", "B")) %>% 
+  dplyr::select(`School`, `% Economically Disadvantaged`:`% LEP`) %>% 
+  arrange(`School`)
+
+datatable(inclang, options = list(pageLength = 20, dom = 't'), rownames=F) %>% 
+  formatPercentage(c("% Economically Disadvantaged","% LEP"), 0)
+```
+
+
+## School Accountability
+```{r}
+acct <- df4 %>% 
+  filter(GRDTYPE %in% c("S", "B")) %>% 
+  dplyr::select(`School`, `Overall`:`Closing the gaps`) %>% 
+  arrange(`School`)
+
+datatable(acct, options = list(pageLength = 20, dom = 't'), rownames=F) 
+```
+
